@@ -1,2 +1,7 @@
 bin
 common/link.ld
+spike_runs/
+*.spike
+data.S
+ideal_dispatcher/temp/
+ideal_dispatcher/vtrace/

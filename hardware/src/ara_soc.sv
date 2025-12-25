@@ -451,7 +451,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   function automatic config_pkg::cva6_user_cfg_t gen_usr_cva6_config(config_pkg::cva6_user_cfg_t cfg);
     cfg.AxiAddrWidth          = AxiAddrWidth;
     cfg.AxiDataWidth          = AxiNarrowDataWidth;
-    cfg.AxiIdWidth            = AxiIdWidth;
+    cfg.AxiIdWidth            = AxiCoreIdWidth;
     cfg.AxiUserWidth          = AxiUserWidth;
     cfg.XF16                  = FPUSupport[3];
     cfg.RVF                   = FPUSupport[4];

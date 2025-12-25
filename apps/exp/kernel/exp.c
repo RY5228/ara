@@ -34,6 +34,7 @@
 */
 
 #include "exp.h"
+#include "runtime.h"
 
 void exp_1xf64_bmark(double *exponents, double *results, size_t len) {
 

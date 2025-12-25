@@ -26,6 +26,10 @@ endif
 config_file := $(ROOT_DIR)/../config/$(config).mk
 include $(abspath $(ROOT_DIR)/../config/$(config).mk)
 
+# This CXX requires running on the EDA_4090 server.
+CXX := /opt/eda/QuestaSim/QuestaSim_2024.2/questasim/gcc-10.3.0-linux_x86_64/bin/g++
+# CXX := $(which g++)
+
 # Clang flags for Verilator command
 ifneq (${CLANG_PATH},)
 	CLANG_CXXFLAGS := -CFLAGS "-nostdinc++ -isystem $(CLANG_PATH)/include/c++/v1"
@@ -230,7 +234,11 @@ $(veril_library)/V$(veril_top): $(config_file) Makefile ../Bender.yml $(shell fi
 # Simulation
 .PHONY: simv
 simv:
+ifeq ($(ideal_dispatcher), 1)
+	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -l ram,$(app_path)/$(app).ideal,elf
+else
 	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -l ram,$(app_path)/$(app),elf
+endif
 
 .PHONY: riscv_tests_simv
 riscv_tests_simv: $(tests)
