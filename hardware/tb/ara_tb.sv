@@ -46,6 +46,10 @@ module ara_tb;
 
   localparam DRAMAddrBase = 64'h8000_0000;
   localparam DRAMLength   = 64'h4000_0000; // 1GByte of DDR (split between two chips on Genesys2)
+  
+  // RRAM address range (for ara_soc_ram.sv)
+  localparam RRAMAddrBase = 64'h1000_0000; // RRAM memory base address
+  localparam RRAMLength   = 64'h4000_0000; // RRAM memory length
 
   /********************************
    *  Clock and Reset Generation  *
@@ -131,12 +135,24 @@ module ara_tb;
           for (int b = 0; b < AxiWideBeWidth; b++) begin
             mem_row[8 * b +: 8] = buffer[w * AxiWideBeWidth + b];
           end
-          if (address >= DRAMAddrBase && address < DRAMAddrBase + DRAMLength)
+          // Check if address is in L2 (DRAM) region
+          if (address >= DRAMAddrBase && address < DRAMAddrBase + DRAMLength) begin
             // This requires the sections to be aligned to AxiWideByteOffset,
             // otherwise, they can be over-written.
             dut.i_ara_soc.i_dram.init_val[(address - DRAMAddrBase + (w << AxiWideByteOffset)) >> AxiWideByteOffset] = mem_row;
-          else
-            $display("Cannot initialize address %x, which doesn't fall into the L2 region.", address);
+          end
+          // Check if address is in RRAM region
+          else if (address >= RRAMAddrBase && address < RRAMAddrBase + RRAMLength) begin
+            // Initialize RRAM init_val array
+            // Note: This assumes ara_soc_ram.sv is being used (with RRAM support)
+            // The path may need adjustment based on your actual module hierarchy
+            dut.i_ara_soc.i_rram.init_val[(address - RRAMAddrBase + (w << AxiWideByteOffset)) >> AxiWideByteOffset] = mem_row;
+            $display("Initializing RRAM at address %x with data %x", 
+                     address + (w << AxiWideByteOffset), mem_row);
+          end
+          else begin
+            $display("Cannot initialize address %x, which doesn't fall into the L2 or RRAM region.", address);
+          end
         end
       end
     end else begin

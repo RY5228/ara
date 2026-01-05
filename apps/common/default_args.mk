@@ -38,3 +38,7 @@ def_args_spmv        ?= "128 128 0.6"
 def_args_conjugate_gradient	?= "128 0 0.5"
 # box1d, particles_per_box, alpha, maxelm
 def_args_lavamd      ?= "2 32 0.5 128"
+# RRAM size
+def_args_rram        ?= "100"
+# RRAM to SRAM size
+def_args_rram_to_sram ?= "100"

@@ -73,7 +73,8 @@ module ara_testharness #(
     .AxiDataWidth(AxiDataWidth ),
     .AxiIdWidth  (AxiIdWidth   ),
     .AxiUserWidth(AxiUserWidth ),
-    .AxiRespDelay(AxiRespDelay )
+    .AxiRespDelay(AxiRespDelay ),
+    .RRAMLatency (32'd3        )
   ) i_ara_soc (
     .clk_i         (clk_i       ),
     .rst_ni        (rst_ni      ),
