@@ -23,7 +23,7 @@ def_args_fft         ?= "64 float32"
 # Vector size
 def_args_dwt         ?= "512"
 # Vector size
-def_args_exp         ?= "128"
+def_args_exp         ?= "128"  
 def_args_cos         ?= "512"
 def_args_log         ?= "512"
 # Channels and Inner size
@@ -38,3 +38,7 @@ def_args_spmv        ?= "128 128 0.6"
 def_args_conjugate_gradient	?= "128 0 0.5"
 # box1d, particles_per_box, alpha, maxelm
 def_args_lavamd      ?= "2 32 0.5 128"
+# RRAM size
+def_args_rram        ?= "100"
+# RRAM to SRAM size
+def_args_rram_to_sram ?= "100"

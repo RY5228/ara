@@ -24,9 +24,13 @@ int main(int argc, char **argv) {
                  VerilatorSimCtrlFlags::ResetPolarityNegative);
 
   // Initialize the DRAM
-  MemAreaLoc l2_mem = {.base=0x80000000, .size=0x00100000};
+  MemAreaLoc l2_mem = {.base=0x80000000, .size=0x02000000};
   memutil.RegisterMemoryArea(
                              "ram", "TOP.ara_tb_verilator.dut.i_ara_soc.i_dram", 64*NR_LANES/2, &l2_mem);
+ // Initialize the RRAM
+  MemAreaLoc rram_mem = {.base=0x10000000, .size=0x40000000};  // 1GB
+  memutil.RegisterMemoryArea(
+                             "rram", "TOP.ara_tb_verilator.dut.i_ara_soc.i_rram", 64*NR_LANES/2, &rram_mem);
   simctrl.RegisterExtension(&memutil);
 
   simctrl.SetInitialResetDelay(5);

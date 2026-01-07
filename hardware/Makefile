@@ -12,6 +12,7 @@ VERILATOR_INCLUDE := $(INSTALL_DIR)/verilator/share/verilator/include/vltstd
 
 BENDER         := $(ROOT_DIR)/../hardware/bender
 BENDER_VERSION := 0.27.3
+CXX := /opt/eda/QuestaSim/QuestaSim_2024.2/questasim/gcc-10.3.0-linux_x86_64/bin/g++
 
 # Choose Ara's configuration
 ifndef config
@@ -235,9 +236,9 @@ $(veril_library)/V$(veril_top): $(config_file) Makefile ../Bender.yml $(shell fi
 .PHONY: simv
 simv:
 ifeq ($(ideal_dispatcher), 1)
-	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -l ram,$(app_path)/$(app).ideal,elf
+	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -E ram,$(app_path)/$(app).ideal
 else
-	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -l ram,$(app_path)/$(app),elf
+	$(veril_library)/V$(veril_top) $(if $(trace),-t,) -E ram,$(app_path)/$(app)
 endif
 
 .PHONY: riscv_tests_simv
@@ -274,3 +275,5 @@ $(buildpath)/$(dpi_library)/ara_dpi.so: $(dpi)
 clean:
 	rm -rf $(buildpath)
 	rm -f  $(BENDER)
+clean_build:
+	rm -rf $(buildpath)
