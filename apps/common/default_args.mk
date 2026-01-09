@@ -42,3 +42,5 @@ def_args_lavamd      ?= "2 32 0.5 128"
 def_args_rram        ?= "100"
 # RRAM to SRAM size
 def_args_rram_to_sram ?= "100"
+# Tensorcore GEMM size
+def_args_tensorcore_gemm ?= "127 254 127"

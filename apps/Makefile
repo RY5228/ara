@@ -166,6 +166,19 @@ spike-run-$1: bin/$1.spike
 endef
 $(foreach app,$(APPS),$(eval $(call run_benchmark_spike,$(app))))
 
+tensorcore_gemm/libtensorcore_gemm.so:
+	$(MAKE) -C tensorcore_gemm libtensorcore_gemm.so
+
+spike-run-tensorcore_gemm: bin/tensorcore_gemm.spike tensorcore_gemm/libtensorcore_gemm.so
+	mkdir -p spike_runs
+	@echo
+	@echo "Simulating tensorcore_gemm with SPIKE (TensorCore device enabled):"
+	@echo
+	$(RISCV_SIM) $(RISCV_SIM_OPT) \
+		--extlib=$(APPS_DIR)/tensorcore_gemm/libtensorcore_gemm.so \
+		--device=tensorcore_gemm,0xD0001000, \
+		$< | tee spike_runs/$@
+
 # Clean Spike simulation
 .PHONY: riscv_tests_spike_clean
 riscv_tests_spike_clean:

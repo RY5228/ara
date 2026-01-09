@@ -5,3 +5,4 @@ spike_runs/
 data.S
 ideal_dispatcher/temp/
 ideal_dispatcher/vtrace/
+*.so
