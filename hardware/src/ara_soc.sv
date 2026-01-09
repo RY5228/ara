@@ -28,6 +28,9 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     parameter  int           unsigned AxiRespDelay = 200,
     // Main memory
     parameter  int           unsigned L2NumWords   = (2**22) / NrLanes,
+    // RRAM memory
+    parameter  int           unsigned RRAMNumWords = (2**22) / NrLanes,
+    parameter  int           unsigned RRAMLatency = 32'd3,
     // Dependant parameters. DO NOT CHANGE!
     localparam type                   axi_data_t   = logic [AxiDataWidth-1:0],
     localparam type                   axi_strb_t   = logic [AxiDataWidth/8-1:0],
@@ -69,20 +72,23 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   typedef enum int unsigned {
     L2MEM = 0,
     UART  = 1,
-    CTRL  = 2
+    RRAM  = 2,
+    CTRL  = 3
   } axi_slaves_e;
   localparam NrAXISlaves = CTRL + 1;
 
   // Memory Map
-  // 1GByte of DDR (split between two chips on Genesys2)
-  localparam logic [63:0] DRAMLength = 64'h40000000;
+  // 32MByte of L2,1GByte of RRAM (split between two chips on Genesys2)
+  localparam logic [63:0] DRAMLength = 64'h200_0000; //L2
   localparam logic [63:0] UARTLength = 64'h1000;
   localparam logic [63:0] CTRLLength = 64'h1000;
+  localparam logic [63:0] RRAMLength = 64'h4000_0000; //RRAM
 
   typedef enum logic [63:0] {
-    DRAMBase = 64'h8000_0000,
+    DRAMBase = 64'h8000_0000, //L2 memory
     UARTBase = 64'hC000_0000,
-    CTRLBase = 64'hD000_0000
+    CTRLBase = 64'hD000_0000,
+    RRAMBase = 64'h1000_0000 //RRAM memory
   } soc_bus_start_e;
 
   ///////////
@@ -90,11 +96,11 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   ///////////
 
   // Ariane's AXI port data width
-  localparam AxiNarrowDataWidth = 64;
-  localparam AxiNarrowStrbWidth = AxiNarrowDataWidth / 8;
+  localparam AxiNarrowDataWidth = 64;  //Ariane（CVA6）CPU 的 AXI 数据宽度
+  localparam AxiNarrowStrbWidth = AxiNarrowDataWidth / 8; //标识数据总线中哪些字节有效
   // Ara's AXI port data width
-  localparam AxiWideDataWidth   = AxiDataWidth;
-  localparam AXiWideStrbWidth   = AxiWideDataWidth / 8;
+  localparam AxiWideDataWidth   = AxiDataWidth;  //Ara 向量处理器的 AXI 数据宽度
+  localparam AXiWideStrbWidth   = AxiWideDataWidth / 8; //标识数据总线中哪些字节有效
 
   localparam AxiSocIdWidth  = AxiIdWidth - $clog2(NrAXIMasters);
   localparam AxiCoreIdWidth = AxiSocIdWidth - 1;
@@ -152,7 +158,8 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   assign routing_rules = '{
     '{idx: CTRL, start_addr: CTRLBase, end_addr: CTRLBase + CTRLLength},
     '{idx: UART, start_addr: UARTBase, end_addr: UARTBase + UARTLength},
-    '{idx: L2MEM, start_addr: DRAMBase, end_addr: DRAMBase + DRAMLength}
+    '{idx: L2MEM, start_addr: DRAMBase, end_addr: DRAMBase + DRAMLength},
+    '{idx: RRAM, start_addr: RRAMBase, end_addr: RRAMBase + RRAMLength}
   };
 
   axi_xbar #(
@@ -260,6 +267,108 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
 
   // One-cycle latency
   `FF(l2_rvalid, l2_req, 1'b0);
+
+  ///////////
+  // RRAM   //
+  //////////
+
+  // The RRAM memory does not support atomics
+
+  soc_wide_req_t  rram_wide_axi_req_wo_atomics;
+  soc_wide_resp_t rram_wide_axi_resp_wo_atomics;
+  axi_atop_filter #(
+    .AxiIdWidth     (AxiSocIdWidth  ),
+    .AxiMaxWriteTxns(4              ),
+    .axi_req_t      (soc_wide_req_t ),
+    .axi_resp_t     (soc_wide_resp_t)
+  ) i_rram_atop_filter (
+    .clk_i     (clk_i                         ),
+    .rst_ni    (rst_ni                        ),
+    .slv_req_i (periph_wide_axi_req[RRAM]    ),
+    .slv_resp_o(periph_wide_axi_resp[RRAM]   ),
+    .mst_req_o (rram_wide_axi_req_wo_atomics ),
+    .mst_resp_i(rram_wide_axi_resp_wo_atomics)
+  );
+
+  logic                      rram_req;
+  logic                      rram_we;
+  logic [AxiAddrWidth-1:0]   rram_addr;
+  logic [AxiDataWidth/8-1:0] rram_be;
+  logic [AxiDataWidth-1:0]   rram_wdata;
+  logic [AxiDataWidth-1:0]   rram_rdata;
+  logic                      rram_rvalid;
+
+  axi_to_mem #(
+    .AddrWidth (AxiAddrWidth   ),
+    .DataWidth (AxiDataWidth   ),
+    .IdWidth   (AxiSocIdWidth  ),
+    .NumBanks  (1              ),
+    .axi_req_t (soc_wide_req_t ),
+    .axi_resp_t(soc_wide_resp_t)
+  ) i_axi_to_rram_mem (
+    .clk_i       (clk_i                         ),
+    .rst_ni      (rst_ni                        ),
+    .axi_req_i   (rram_wide_axi_req_wo_atomics ),
+    .axi_resp_o  (rram_wide_axi_resp_wo_atomics),
+    .mem_req_o   (rram_req                        ),
+    .mem_gnt_i   (rram_req                        ), // Always available
+    .mem_we_o    (rram_we                         ),
+    .mem_addr_o  (rram_addr                       ),
+    .mem_strb_o  (rram_be                         ),
+    .mem_wdata_o (rram_wdata                      ),
+    .mem_rdata_i (rram_rdata                      ),
+    .mem_rvalid_i(rram_rvalid                     ),
+    .mem_atop_o  (/* Unused */                  ),
+    .busy_o      (/* Unused */                  )
+  );
+
+`ifndef SPYGLASS
+  tc_sram #(
+    .NumWords (RRAMNumWords),
+    .NumPorts (1           ),
+    .DataWidth(AxiDataWidth),
+    .SimInit("random"),
+    .Latency(RRAMLatency)
+  ) i_rram (
+    .clk_i  (clk_i                                                                          ),
+    .rst_ni (rst_ni                                                                         ),
+    .req_i  (rram_req                                                                       ),
+    .we_i   (1'b0                  ),
+    .addr_i (rram_addr[$clog2(RRAMNumWords)-1+$clog2(AxiDataWidth/8):$clog2(AxiDataWidth/8)]),
+    .wdata_i(rram_wdata                                                                     ),
+    .be_i   (rram_be                                                                        ),
+    .rdata_o(rram_rdata                                                                     )
+  );
+`else
+  assign rram_rdata = '0;
+`endif
+
+  // // One-cycle latency
+  // `FF(rram_rvalid, rram_req, 1'b0);
+
+  // // RRAM latency delay chain (3 cycles using FF)
+  // logic rram_req_d1, rram_req_d2;
+  // `FF(rram_req_d1, rram_req, 1'b0);
+  // `FF(rram_req_d2, rram_req_d1, 1'b0);
+  // `FF(rram_rvalid, rram_req_d2, 1'b0);
+
+  logic [RRAMLatency-1:0] rram_req_delay;
+
+  // First stage: delay from rram_req
+  `FF(rram_req_delay[0], rram_req, 1'b0);
+  
+  // Generate intermediate delay stages if RRAMLatency > 1
+  genvar i;
+  generate
+    if (RRAMLatency > 1) begin: gen_rram_delay_chain
+      for (i = 1; i < RRAMLatency; i++) begin : gen_delay_stage
+        `FF(rram_req_delay[i], rram_req_delay[i-1], 1'b0);
+      end
+    end
+  endgenerate
+  
+  // Last stage: rram_rvalid form the last delay stage
+  `FF(rram_rvalid, rram_req_delay[RRAMLatency-1], 1'b0);
 
   ////////////
   //  UART  //
