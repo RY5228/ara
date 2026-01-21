@@ -162,6 +162,39 @@ $(buildpath)/compile_$(config).tcl: $(config_file) Makefile ../Bender.yml $(shel
 	# Rename the file if compilation did not succeed
 	if [ `cat $(buildpath)/transcript | grep "\*\* Error" | wc -l` -ne 0 ]; then mv $(buildpath)/compile_$(config).tcl $(buildpath)/compile_$(config).tcl.ERROR; fi
 
+# Synthesis
+synpath      ?= $(buildpath)/syn
+$(synpath): $(buildpath)
+	mkdir -p $(synpath)
+
+syn-apply-patches:
+	cd deps/axi && git apply ../../patches/0002-axi-xbar-unmuxed-target-genus.patch
+
+export SYN_SCRIPTS_DIR := $(ROOT_DIR)/scripts/syn
+export TOP_MODULE := ara_soc
+export SYN_DIR := $(abspath $(synpath))
+export SETUP_LIB := $(SETUP_LIB)
+export HOLD_LIB := $(HOLD_LIB)
+export LEF_TECH := $(LEF_TECH)
+export LEF_STDCELL := $(LEF_STDCELL)
+export CLK_NAME := clk_i
+export CLK_PORT_NAME := clk_i
+export CLK_PERIOD_PS := 1000.0
+export INPUT_DELAY_PS := 0.0
+export OUTPUT_DELAY_PS := 0.0
+export SYN_GENERIC_EFFORT := high
+export SYN_MAP_EFFORT := high
+export NR_LANES := $(nr_lanes)
+export VLEN := $(vlen)
+export OS_SUPPORT := 0 # 1 for OS support, 0 for no OS support
+
+.PHONY: synthesis
+synthesis: $(synpath) $(synpath)/syn_$(config).tcl $(SYN_SCRIPTS_DIR)/syn.tcl $(SYN_SCRIPTS_DIR)/report.tcl
+	cd $(synpath) && genus -abort_on_error -overwrite -files syn_$(config).tcl -files $(SYN_SCRIPTS_DIR)/syn.tcl -log syn_$(config).log
+	cd $(synpath) && genus -abort_on_error -overwrite -files $(SYN_SCRIPTS_DIR)/report.tcl -log report_$(config).log
+$(synpath)/syn_$(config).tcl: $(synpath) $(config_file) Makefile ../Bender.yml $(shell find src -type f) $(shell find ../config -type f) $(shell find include -type f) $(shell find tb -type f) $(shell find deps -type f)
+	$(BENDER) script genus $(bender_common_targs) $(bender_defs) > $(synpath)/syn_$(config).tcl
+
 # Simulation
 .PHONY: sim
 sim: compile
@@ -274,5 +307,10 @@ $(buildpath)/$(dpi_library)/ara_dpi.so: $(dpi)
 clean:
 	rm -rf $(buildpath)
 	rm -f  $(BENDER)
-clean_build:
+	rm -rf $(synpath)
+
+clean-build:
 	rm -rf $(buildpath)
+
+clean-syn:
+	rm -rf $(synpath)

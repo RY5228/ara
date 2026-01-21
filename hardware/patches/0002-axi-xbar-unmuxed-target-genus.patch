@@ -1,0 +1,17 @@
+diff --git a/src/axi_xbar_unmuxed.sv b/src/axi_xbar_unmuxed.sv
+index 32679900..3704e694 100644
+--- a/src/axi_xbar_unmuxed.sv
++++ b/src/axi_xbar_unmuxed.sv
+@@ -285,6 +285,7 @@ import cf_math_pkg::idx_width;
+ endmodule
+ 
+ `ifndef VCS
++`ifndef TARGET_GENUS
+ // As of now, VCS does not support multi-dimensional array of interfaces.
+ `include "axi/assign.svh"
+ `include "axi/typedef.svh"
+@@ -367,3 +368,4 @@ import cf_math_pkg::idx_width;
+ endmodule
+ 
+ `endif
++`endif
