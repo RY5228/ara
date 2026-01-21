@@ -1,8 +1,26 @@
 diff --git a/src/rtl/tc_sram.sv b/src/rtl/tc_sram.sv
-index b702a11..eeef776 100644
+index b702a11..6f01698 100644
 --- a/src/rtl/tc_sram.sv
 +++ b/src/rtl/tc_sram.sv
-@@ -145,12 +145,14 @@ module tc_sram #(
+@@ -53,6 +53,9 @@
+ //                       `rdata_o` when `req_i` and `we_i` are asserted. The output data is stable
+ //                       on write requests.
+ 
++`ifdef TARGET_GENUS
++(* black_box *)
++`endif // TARGET_GENUS
+ module tc_sram #(
+   parameter int unsigned NumWords     = 32'd1024, // Number of Words in data array
+   parameter int unsigned DataWidth    = 32'd128,  // Data signal width
+@@ -81,6 +84,7 @@ module tc_sram #(
+   output data_t [NumPorts-1:0] rdata_o     // read data
+ );
+ 
++`ifndef TARGET_GENUS
+   // memory array
+   data_t sram [NumWords-1:0];
+   // hold the read address when no read access is made
+@@ -145,12 +149,14 @@ module tc_sram #(
          for (int unsigned i = 0; i < NumPorts; i++) begin
            if (req_i[i]) begin
              if (we_i[i]) begin
@@ -17,7 +35,7 @@ index b702a11..eeef776 100644
              end else begin
                // otherwise update read address for subsequent non request cycles
                r_addr_q[i] <= addr_i[i];
-@@ -163,7 +165,9 @@ module tc_sram #(
+@@ -163,7 +169,9 @@ module tc_sram #(
      // write memory array
      always_ff @(posedge clk_i or negedge rst_ni) begin
        if (!rst_ni) begin
@@ -27,7 +45,7 @@ index b702a11..eeef776 100644
          for (int i = 0; i < NumPorts; i++) begin
            r_addr_q[i] <= {AddrWidth{1'b0}};
            // initialize the read output register for each port
-@@ -186,12 +190,14 @@ module tc_sram #(
+@@ -186,12 +194,14 @@ module tc_sram #(
          for (int unsigned i = 0; i < NumPorts; i++) begin
            if (req_i[i]) begin
              if (we_i[i]) begin
@@ -42,7 +60,7 @@ index b702a11..eeef776 100644
              end else begin
                // otherwise update read address for subsequent non request cycles
                r_addr_q[i] <= addr_i[i];
-@@ -202,6 +208,23 @@ module tc_sram #(
+@@ -202,6 +212,23 @@ module tc_sram #(
      end
    end
  
@@ -66,7 +84,7 @@ index b702a11..eeef776 100644
  // Validate parameters.
  // pragma translate_off
  `ifndef VERILATOR
-@@ -242,4 +265,59 @@ module tc_sram #(
+@@ -242,4 +269,59 @@ module tc_sram #(
  `endif
  `endif
  // pragma translate_on
@@ -124,5 +142,5 @@ index b702a11..eeef776 100644
 +    return 1;
 +  endfunction
 +  `endif
-+
++`endif // TARGET_GENUS
  endmodule
