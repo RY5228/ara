@@ -64,8 +64,12 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
     input  logic                    scan_data_i,
     output logic                    scan_data_o,
     // AXI Interface
-    output system_axi_req_t         axi_req_o,
-    input  system_axi_resp_t        axi_resp_i
+    // Master Ports
+    output system_axi_req_t         axi_mst_req_o,
+    input  system_axi_resp_t        axi_mst_resp_i,
+    // Slave Ports
+    input  tc_pkg::axi_slv_req_t    axi_slv_req_i,
+    output tc_pkg::axi_slv_resp_t   axi_slv_resp_o
   );
 
   `include "axi/assign.svh"
@@ -75,14 +79,18 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
   //  AXI  //
   ///////////
 
+  localparam AxiAccIdWidth = AxiIdWidth - 1;
+
   ariane_axi_req_t  ariane_narrow_axi_req;
   ariane_axi_resp_t ariane_narrow_axi_resp;
-  ara_axi_req_t     ariane_axi_req, ara_axi_req_inval, ara_axi_req;
-  ara_axi_resp_t    ariane_axi_resp, ara_axi_resp_inval, ara_axi_resp;
+  ara_axi_req_t     ara_narrow_axi_req;
+  ara_axi_resp_t    ara_narrow_axi_resp;
+  tc_pkg::axi_mst_req_t ariane_axi_req, coproc_axi_req_inval, coproc_axi_req, tc_axi_mst_req, ara_axi_req;
+  tc_pkg::axi_mst_resp_t ariane_axi_resp, coproc_axi_resp_inval, coproc_axi_resp, tc_axi_mst_resp, ara_axi_resp;
 
-  //////////////////////
-  //  Ara and Ariane  //
-  //////////////////////
+  ///////////////////////////////////
+  //  Ara, Ariane and Tensor Core  //
+  ///////////////////////////////////
 
   // Accelerator ports
   cva6_to_acc_t        acc_req;
@@ -164,19 +172,19 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
 
   axi_dw_converter #(
     .AxiSlvPortDataWidth(AxiNarrowDataWidth),
-    .AxiMstPortDataWidth(AxiWideDataWidth  ),
+    .AxiMstPortDataWidth(tc_pkg::AXI_DATA_WIDTH  ),
     .AxiAddrWidth       (AxiAddrWidth      ),
     .AxiIdWidth         (AxiIdWidth        ),
     .AxiMaxReads        (2                 ),
     .ar_chan_t          (ariane_axi_ar_t   ),
-    .mst_r_chan_t       (ara_axi_r_t       ),
+    .mst_r_chan_t       (tc_pkg::axi_mst_r_chan_t       ),
     .slv_r_chan_t       (ariane_axi_r_t    ),
     .aw_chan_t          (ariane_axi_aw_t   ),
     .b_chan_t           (ariane_axi_b_t    ),
     .mst_w_chan_t       (ara_axi_w_t       ),
     .slv_w_chan_t       (ariane_axi_w_t    ),
-    .axi_mst_req_t      (ara_axi_req_t     ),
-    .axi_mst_resp_t     (ara_axi_resp_t    ),
+    .axi_mst_req_t      (tc_pkg::axi_mst_req_t     ),
+    .axi_mst_resp_t     (tc_pkg::axi_mst_resp_t    ),
     .axi_slv_req_t      (ariane_axi_req_t  ),
     .axi_slv_resp_t     (ariane_axi_resp_t )
   ) i_ariane_axi_dwc (
@@ -190,34 +198,6 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
     .slv_resp_o(ariane_narrow_axi_resp),
     .mst_req_o (ariane_axi_req        ),
     .mst_resp_i(ariane_axi_resp       )
-  );
-
-  axi_inval_filter #(
-    .MaxTxns    (4                              ),
-    .AddrWidth  (AxiAddrWidth                   ),
-    .L1LineWidth(CVA6Cfg.DCACHE_LINE_WIDTH/8    ),
-    .aw_chan_t  (ara_axi_aw_t                   ),
-    .req_t      (ara_axi_req_t                  ),
-    .resp_t     (ara_axi_resp_t                 )
-  ) i_axi_inval_filter (
-    .clk_i        (clk_i             ),
-    .rst_ni       (rst_ni            ),
-`ifdef IDEAL_DISPATCHER
-    .en_i         (1'b0              ),
-`else
-    .en_i         (acc_cons_en       ),
-`endif
-    .slv_req_i    (ara_axi_req       ),
-    .slv_resp_o   (ara_axi_resp      ),
-    .mst_req_o    (ara_axi_req_inval ),
-    .mst_resp_i   (ara_axi_resp_inval),
-    .inval_addr_o (inval_addr        ),
-    .inval_valid_o(inval_valid       ),
-`ifdef IDEAL_DISPATCHER
-    .inval_ready_i(1'b0              )
-`else
-    .inval_ready_i(inval_ready       )
-`endif
   );
 
   ara #(
@@ -253,18 +233,116 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
     .scan_data_o     (/* Unused */  ),
     .acc_req_i       (acc_req       ),
     .acc_resp_o      (acc_resp      ),
-    .axi_req_o       (ara_axi_req   ),
-    .axi_resp_i      (ara_axi_resp  )
+    .axi_req_o       (ara_narrow_axi_req   ),
+    .axi_resp_i      (ara_narrow_axi_resp  )
+  );
+
+  axi_dw_converter #(
+    .AxiSlvPortDataWidth(AxiWideDataWidth  ),
+    .AxiMstPortDataWidth(tc_pkg::AXI_DATA_WIDTH ),
+    .AxiAddrWidth       (AxiAddrWidth      ),
+    .AxiIdWidth         (AxiAccIdWidth     ),
+    .AxiMaxReads        (2                 ),
+    .ar_chan_t          (ara_axi_ar_t      ),
+    .mst_r_chan_t       (tc_pkg::axi_mst_r_chan_t     ),
+    .slv_r_chan_t       (ara_axi_r_t       ),
+    .aw_chan_t          (ara_axi_aw_t      ),
+    .b_chan_t           (ara_axi_b_t       ),
+    .mst_w_chan_t       (tc_pkg::axi_mst_w_chan_t     ),
+    .slv_w_chan_t       (ara_axi_w_t       ),
+    .axi_mst_req_t      (tc_pkg::axi_mst_req_t   ),
+    .axi_mst_resp_t     (tc_pkg::axi_mst_resp_t  ),
+    .axi_slv_req_t      (ara_axi_req_t     ),
+    .axi_slv_resp_t     (ara_axi_resp_t    )
+  ) i_ara_axi_dwc (
+    .clk_i     (clk_i                 ),
+    .rst_ni    (rst_ni                ),
+`ifdef IDEAL_DISPATCHER
+    .slv_req_i ('0                    ),
+`else
+    .slv_req_i (ara_narrow_axi_req   ),
+`endif
+    .slv_resp_o(ara_narrow_axi_resp  ),
+    .mst_req_o (ara_axi_req          ),
+    .mst_resp_i(ara_axi_resp         )
+  );
+
+  tc_top i_tc_top(
+    .clk_i            (clk_i                 ),
+    .rst_ni           (rst_ni                ),
+    .axi_mst_req_o    (tc_axi_mst_req        ),
+    .axi_mst_resp_i   (tc_axi_mst_resp       ),
+    .axi_slv_req_i    (axi_slv_req_i         ),
+    .axi_slv_resp_o   (axi_slv_resp_o        )
+  );
+
+  axi_mux #(
+    .SlvAxiIDWidth(AxiAccIdWidth        ),
+    .slv_ar_chan_t(tc_pkg::axi_mst_ar_chan_t   ),
+    .slv_aw_chan_t(tc_pkg::axi_mst_aw_chan_t   ),
+    .slv_b_chan_t (tc_pkg::axi_mst_b_chan_t    ),
+    .slv_r_chan_t (tc_pkg::axi_mst_r_chan_t    ),
+    .slv_req_t    (tc_pkg::axi_mst_req_t  ),
+    .slv_resp_t   (tc_pkg::axi_mst_resp_t ),
+    .mst_ar_chan_t(tc_pkg::axi_mst_ar_chan_t   ),
+    .mst_aw_chan_t(tc_pkg::axi_mst_aw_chan_t   ),
+    .w_chan_t     (tc_pkg::axi_mst_w_chan_t    ),
+    .mst_b_chan_t (tc_pkg::axi_mst_b_chan_t    ),
+    .mst_r_chan_t (tc_pkg::axi_mst_r_chan_t    ),
+    .mst_req_t    (tc_pkg::axi_mst_req_t  ),
+    .mst_resp_t   (tc_pkg::axi_mst_resp_t ),
+    .NoSlvPorts   (2                    ),
+    .SpillAr      (1'b1                 ),
+    .SpillR       (1'b1                 ),
+    .SpillAw      (1'b1                 ),
+    .SpillW       (1'b1                 ),
+    .SpillB       (1'b1                 )
+  ) i_acc_mux (
+    .clk_i      (clk_i                             ),
+    .rst_ni     (rst_ni                            ),
+    .test_i     (1'b0                              ),
+    .slv_reqs_i ({ara_axi_req, tc_axi_mst_req}  ),
+    .slv_resps_o({ara_axi_resp, tc_axi_mst_resp}),
+    .mst_req_o  (coproc_axi_req                       ),
+    .mst_resp_i (coproc_axi_resp                      )
+  );
+
+  axi_inval_filter #(
+    .MaxTxns    (4                              ),
+    .AddrWidth  (AxiAddrWidth                   ),
+    .L1LineWidth(CVA6Cfg.DCACHE_LINE_WIDTH/8    ),
+    .aw_chan_t  (tc_pkg::axi_mst_aw_chan_t                   ),
+    .req_t      (tc_pkg::axi_mst_req_t                  ),
+    .resp_t     (tc_pkg::axi_mst_resp_t                 )
+  ) i_axi_inval_filter (
+    .clk_i        (clk_i             ),
+    .rst_ni       (rst_ni            ),
+`ifdef IDEAL_DISPATCHER
+    .en_i         (1'b0              ),
+`else
+    .en_i         (acc_cons_en       ),
+`endif
+    .slv_req_i    (coproc_axi_req       ),
+    .slv_resp_o   (coproc_axi_resp      ),
+    .mst_req_o    (coproc_axi_req_inval ),
+    .mst_resp_i   (coproc_axi_resp_inval),
+    .inval_addr_o (inval_addr        ),
+    .inval_valid_o(inval_valid       ),
+`ifdef IDEAL_DISPATCHER
+    .inval_ready_i(1'b0              )
+`else
+    .inval_ready_i(inval_ready       )
+`endif
   );
 
   axi_mux #(
     .SlvAxiIDWidth(AxiIdWidth       ),
-    .slv_ar_chan_t(ara_axi_ar_t     ),
-    .slv_aw_chan_t(ara_axi_aw_t     ),
-    .slv_b_chan_t (ara_axi_b_t      ),
-    .slv_r_chan_t (ara_axi_r_t      ),
-    .slv_req_t    (ara_axi_req_t    ),
-    .slv_resp_t   (ara_axi_resp_t   ),
+    .slv_ar_chan_t(tc_pkg::axi_mst_ar_chan_t     ),
+    .slv_aw_chan_t(tc_pkg::axi_mst_aw_chan_t     ),
+    .slv_b_chan_t (tc_pkg::axi_mst_b_chan_t      ),
+    .slv_r_chan_t (tc_pkg::axi_mst_r_chan_t      ),
+    .slv_req_t    (tc_pkg::axi_mst_req_t    ),
+    .slv_resp_t   (tc_pkg::axi_mst_resp_t   ),
     .mst_ar_chan_t(system_axi_ar_t  ),
     .mst_aw_chan_t(system_axi_aw_t  ),
     .w_chan_t     (system_axi_w_t   ),
@@ -282,10 +360,10 @@ module ara_system import axi_pkg::*; import ara_pkg::*; #(
     .clk_i      (clk_i                                ),
     .rst_ni     (rst_ni                               ),
     .test_i     (1'b0                                 ),
-    .slv_reqs_i ({ara_axi_req_inval, ariane_axi_req}  ),
-    .slv_resps_o({ara_axi_resp_inval, ariane_axi_resp}),
-    .mst_req_o  (axi_req_o                            ),
-    .mst_resp_i (axi_resp_i                           )
+    .slv_reqs_i ({coproc_axi_req_inval, ariane_axi_req}  ),
+    .slv_resps_o({coproc_axi_resp_inval, ariane_axi_resp}),
+    .mst_req_o  (axi_mst_req_o                            ),
+    .mst_resp_i (axi_mst_resp_i                           )
   );
 
 endmodule : ara_system

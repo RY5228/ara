@@ -61,3 +61,9 @@ packages:
       Git: https://github.com/pulp-platform/tech_cells_generic.git
     dependencies:
     - common_verification
+  tensor-core:
+    revision: b86c76ff5dbc324ff9dfccf1ab5bb8e87b05cceb
+    version: null
+    source:
+      Git: https://github.com/hahahahhha/Tensor-Core.git
+    dependencies: []

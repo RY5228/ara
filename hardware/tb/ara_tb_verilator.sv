@@ -20,7 +20,7 @@ module ara_tb_verilator #(
    *****************/
 
   localparam AxiAddrWidth     = 64;
-  localparam AxiWideDataWidth = 64 * NrLanes / 2;
+  localparam AxiWideDataWidth = tc_pkg::AXI_DATA_WIDTH;
 
   /*********
    *  DUT  *

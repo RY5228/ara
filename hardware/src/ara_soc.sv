@@ -20,7 +20,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     // Support for segment memory operations
     parameter  seg_support_e          SegSupport   = SegSupportEnable,
     // AXI Interface
-    parameter  int           unsigned AxiDataWidth = 32*NrLanes,
+    parameter  int           unsigned AxiDataWidth = tc_pkg::AXI_DATA_WIDTH,
     parameter  int           unsigned AxiAddrWidth = 64,
     parameter  int           unsigned AxiUserWidth = 1,
     parameter  int           unsigned AxiIdWidth   = 5,
@@ -73,7 +73,8 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     L2MEM = 0,
     UART  = 1,
     RRAM  = 2,
-    CTRL  = 3
+    TC    = 3,
+    CTRL  = 4
   } axi_slaves_e;
   localparam NrAXISlaves = CTRL + 1;
 
@@ -83,12 +84,14 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   localparam logic [63:0] UARTLength = 64'h1000;
   localparam logic [63:0] CTRLLength = 64'h1000;
   localparam logic [63:0] RRAMLength = 64'h4000_0000; //RRAM
+  localparam logic [63:0] TCLength   = 64'h1000; //Tensor Core
 
   typedef enum logic [63:0] {
     DRAMBase = 64'h8000_0000, //L2 memory
     UARTBase = 64'hC000_0000,
     CTRLBase = 64'hD000_0000,
-    RRAMBase = 64'h1000_0000 //RRAM memory
+    RRAMBase = 64'h1000_0000, //RRAM memory
+    TCBase   = 64'hD000_1000
   } soc_bus_start_e;
 
   ///////////
@@ -98,8 +101,8 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   // Ariane's AXI port data width
   localparam AxiNarrowDataWidth = 64;  //Ariane（CVA6）CPU 的 AXI 数据宽度
   localparam AxiNarrowStrbWidth = AxiNarrowDataWidth / 8; //标识数据总线中哪些字节有效
-  // Ara's AXI port data width
-  localparam AxiWideDataWidth   = AxiDataWidth;  //Ara 向量处理器的 AXI 数据宽度
+  // TC's AXI port data width
+  localparam AxiWideDataWidth   = AxiDataWidth;  //Tensor Core 的 AXI 数据宽度
   localparam AXiWideStrbWidth   = AxiWideDataWidth / 8; //标识数据总线中哪些字节有效
 
   localparam AxiSocIdWidth  = AxiIdWidth - $clog2(NrAXIMasters);
@@ -159,7 +162,8 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     '{idx: CTRL, start_addr: CTRLBase, end_addr: CTRLBase + CTRLLength},
     '{idx: UART, start_addr: UARTBase, end_addr: UARTBase + UARTLength},
     '{idx: L2MEM, start_addr: DRAMBase, end_addr: DRAMBase + DRAMLength},
-    '{idx: RRAM, start_addr: RRAMBase, end_addr: RRAMBase + RRAMLength}
+    '{idx: RRAM, start_addr: RRAMBase, end_addr: RRAMBase + RRAMLength},
+    '{idx: TC, start_addr: TCBase, end_addr: TCBase + TCLength}
   };
 
   axi_xbar #(
@@ -605,7 +609,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     .AxiAddrWidth      (AxiAddrWidth         ),
     .AxiIdWidth        (AxiCoreIdWidth       ),
     .AxiNarrowDataWidth(AxiNarrowDataWidth   ),
-    .AxiWideDataWidth  (AxiDataWidth         ),
+    .AxiWideDataWidth  (32*NrLanes           ),
     .ara_axi_ar_t      (ara_axi_ar_chan_t    ),
     .ara_axi_aw_t      (ara_axi_aw_chan_t    ),
     .ara_axi_b_t       (ara_axi_b_chan_t     ),
@@ -639,12 +643,16 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     .scan_data_i  (1'b0                     ),
     .scan_data_o  (/* Unconnected */        ),
 `ifndef TARGET_GATESIM
-    .axi_req_o    (system_axi_req           ),
-    .axi_resp_i   (system_axi_resp          )
+    .axi_mst_req_o    (system_axi_req           ),
+    .axi_mst_resp_i   (system_axi_resp          ),
+    .axi_slv_req_i    (periph_wide_axi_req[TC]  ),
+    .axi_slv_resp_o   (periph_wide_axi_resp[TC] )
   );
 `else
-    .axi_req_o    (system_axi_req_spill     ),
-    .axi_resp_i   (system_axi_resp_spill_del)
+    .axi_mst_req_o    (system_axi_req_spill     ),
+    .axi_mst_resp_i   (system_axi_resp_spill_del),
+    .axi_slv_req_i    (periph_wide_axi_req[TC]  ),
+    .axi_slv_resp_o   (periph_wide_axi_resp[TC] )
   );
 `endif
 
