@@ -36,9 +36,22 @@
 
   原本的 `AXI_ID_WIDTH` 和 `AXI_USER_WIDTH` 会越界，分别改成5和1，和 `ara_soc.sv` 保持一致。
 
+## 4. apps
+- `apps\common\script\align_sections.sh` ：
+
+  `ALIGNMENT` 改成1024。
+
 ## Tensor Core接入测试
 
 使用了 `apps` 文件夹下面的 `tensorcore_gemm` 作为测试。
+
+```
+cd apps
+make tensorcore_gemm
+cd ../hardware
+make verilate
+app=tensorcore_gemm make simv
+```
 
 测试正常得到的输出如下：
 ```
