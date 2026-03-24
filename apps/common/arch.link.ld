@@ -5,6 +5,7 @@ OUTPUT_ARCH("riscv")
 ENTRY(_start)
 
 MEMORY {
+  RRAM : ORIGIN = 0x10000000, LENGTH = 0x40000000
   L2 : ORIGIN = 0x80000000, LENGTH = 0x02000000
 }
 
@@ -49,6 +50,12 @@ SECTIONS {
     l2_alloc_base = ALIGN(ALIGNMENT);
   } > L2
 
+  /* RRAM section - for read-only data */
+  .rram : ALIGN(ALIGNMENT) {
+    *(.rram)
+    *(.rram.*)
+  } > RRAM
+  
   .comment : ALIGN(ALIGNMENT) { *(.comment) } > L2
 
   eoc_address_reg        = 0xD0000000;

@@ -10,7 +10,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     // RVV Parameters
     parameter  int           unsigned NrLanes      = 0,                          // Number of parallel vector lanes.
     parameter  int           unsigned VLEN         = 0,                          // VLEN [bit]
-    parameter  int           unsigned OSSupport    = 1,                          // Support for OS
+    parameter  int           unsigned OSSupport    = 0,                          // Support for OS
     // Support for floating-point data types
     parameter  fpu_support_e          FPUSupport   = FPUSupportHalfSingleDouble,
     // External support for vfrec7, vfrsqrt7
@@ -20,7 +20,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     // Support for segment memory operations
     parameter  seg_support_e          SegSupport   = SegSupportEnable,
     // AXI Interface
-    parameter  int           unsigned AxiDataWidth = 32*NrLanes,
+    parameter  int           unsigned AxiDataWidth = tc_pkg::AXI_DATA_WIDTH,
     parameter  int           unsigned AxiAddrWidth = 64,
     parameter  int           unsigned AxiUserWidth = 1,
     parameter  int           unsigned AxiIdWidth   = 5,
@@ -28,6 +28,9 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     parameter  int           unsigned AxiRespDelay = 200,
     // Main memory
     parameter  int           unsigned L2NumWords   = (2**22) / NrLanes,
+    // RRAM memory
+    parameter  int           unsigned RRAMNumWords = (2**22) / NrLanes,
+    parameter  int           unsigned RRAMLatency  = 32'd3,
     // Dependant parameters. DO NOT CHANGE!
     localparam type                   axi_data_t   = logic [AxiDataWidth-1:0],
     localparam type                   axi_strb_t   = logic [AxiDataWidth/8-1:0],
@@ -69,20 +72,26 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   typedef enum int unsigned {
     L2MEM = 0,
     UART  = 1,
-    CTRL  = 2
+    RRAM  = 2,
+    TC    = 3,
+    CTRL  = 4
   } axi_slaves_e;
   localparam NrAXISlaves = CTRL + 1;
 
   // Memory Map
-  // 1GByte of DDR (split between two chips on Genesys2)
-  localparam logic [63:0] DRAMLength = 64'h40000000;
+  // 32MByte of L2,1GByte of RRAM (split between two chips on Genesys2)
+  localparam logic [63:0] DRAMLength = 64'h200_0000; //L2
   localparam logic [63:0] UARTLength = 64'h1000;
   localparam logic [63:0] CTRLLength = 64'h1000;
+  localparam logic [63:0] RRAMLength = 64'h4000_0000; //RRAM
+  localparam logic [63:0] TCLength   = 64'h2000; // Tensor Core: 0xD000_1000..0xD000_2FFF (instruction + state)
 
   typedef enum logic [63:0] {
-    DRAMBase = 64'h8000_0000,
+    DRAMBase = 64'h8000_0000, //L2 memory
     UARTBase = 64'hC000_0000,
-    CTRLBase = 64'hD000_0000
+    CTRLBase = 64'hD000_0000,
+    RRAMBase = 64'h1000_0000, //RRAM memory
+    TCBase   = 64'hD000_1000
   } soc_bus_start_e;
 
   ///////////
@@ -90,11 +99,11 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   ///////////
 
   // Ariane's AXI port data width
-  localparam AxiNarrowDataWidth = 64;
-  localparam AxiNarrowStrbWidth = AxiNarrowDataWidth / 8;
-  // Ara's AXI port data width
-  localparam AxiWideDataWidth   = AxiDataWidth;
-  localparam AXiWideStrbWidth   = AxiWideDataWidth / 8;
+  localparam AxiNarrowDataWidth = 64;  //Ariane（CVA6）CPU 的 AXI 数据宽度
+  localparam AxiNarrowStrbWidth = AxiNarrowDataWidth / 8; //标识数据总线中哪些字节有效
+  // TC's AXI port data width
+  localparam AxiWideDataWidth   = AxiDataWidth;  //Tensor Core 的 AXI 数据宽度
+  localparam AXiWideStrbWidth   = AxiWideDataWidth / 8; //标识数据总线中哪些字节有效
 
   localparam AxiSocIdWidth  = AxiIdWidth - $clog2(NrAXIMasters);
   localparam AxiCoreIdWidth = AxiSocIdWidth - 1;
@@ -152,7 +161,9 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
   assign routing_rules = '{
     '{idx: CTRL, start_addr: CTRLBase, end_addr: CTRLBase + CTRLLength},
     '{idx: UART, start_addr: UARTBase, end_addr: UARTBase + UARTLength},
-    '{idx: L2MEM, start_addr: DRAMBase, end_addr: DRAMBase + DRAMLength}
+    '{idx: L2MEM, start_addr: DRAMBase, end_addr: DRAMBase + DRAMLength},
+    '{idx: RRAM, start_addr: RRAMBase, end_addr: RRAMBase + RRAMLength},
+    '{idx: TC, start_addr: TCBase, end_addr: TCBase + TCLength}
   };
 
   axi_xbar #(
@@ -260,6 +271,90 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
 
   // One-cycle latency
   `FF(l2_rvalid, l2_req, 1'b0);
+
+  ///////////
+  // RRAM   //
+  //////////
+
+  // The RRAM memory does not support atomics
+
+  soc_wide_req_t  rram_wide_axi_req_wo_atomics;
+  soc_wide_resp_t rram_wide_axi_resp_wo_atomics;
+  axi_atop_filter #(
+    .AxiIdWidth     (AxiSocIdWidth  ),
+    .AxiMaxWriteTxns(4              ),
+    .axi_req_t      (soc_wide_req_t ),
+    .axi_resp_t     (soc_wide_resp_t)
+  ) i_rram_atop_filter (
+    .clk_i     (clk_i                         ),
+    .rst_ni    (rst_ni                        ),
+    .slv_req_i (periph_wide_axi_req[RRAM]    ),
+    .slv_resp_o(periph_wide_axi_resp[RRAM]   ),
+    .mst_req_o (rram_wide_axi_req_wo_atomics ),
+    .mst_resp_i(rram_wide_axi_resp_wo_atomics)
+  );
+
+  logic                      rram_req;
+  logic                      rram_we;
+  logic [AxiAddrWidth-1:0]   rram_addr;
+  logic [AxiDataWidth/8-1:0] rram_be;
+  logic [AxiDataWidth-1:0]   rram_wdata;
+  logic [AxiDataWidth-1:0]   rram_rdata;
+  logic                      rram_rvalid;
+
+  axi_to_mem #(
+    .AddrWidth (AxiAddrWidth   ),
+    .DataWidth (AxiDataWidth   ),
+    .IdWidth   (AxiSocIdWidth  ),
+    .NumBanks  (1              ),
+    .axi_req_t (soc_wide_req_t ),
+    .axi_resp_t(soc_wide_resp_t)
+  ) i_axi_to_rram_mem (
+    .clk_i       (clk_i                         ),
+    .rst_ni      (rst_ni                        ),
+    .axi_req_i   (rram_wide_axi_req_wo_atomics ),
+    .axi_resp_o  (rram_wide_axi_resp_wo_atomics),
+    .mem_req_o   (rram_req                        ),
+    .mem_gnt_i   (rram_req                        ), // Always available
+    .mem_we_o    (rram_we                         ),
+    .mem_addr_o  (rram_addr                       ),
+    .mem_strb_o  (rram_be                         ),
+    .mem_wdata_o (rram_wdata                      ),
+    .mem_rdata_i (rram_rdata                      ),
+    .mem_rvalid_i(rram_rvalid                     ),
+    .mem_atop_o  (/* Unused */                  ),
+    .busy_o      (/* Unused */                  )
+  );
+
+`ifndef SPYGLASS
+  tc_sram #(
+    .NumWords (RRAMNumWords),
+    .NumPorts (1           ),
+    .DataWidth(AxiDataWidth),
+    .SimInit("random"),
+    .Latency(RRAMLatency)
+  ) i_rram (
+    .clk_i  (clk_i                                                                          ),
+    .rst_ni (rst_ni                                                                         ),
+    .req_i  (rram_req                                                                       ),
+    .we_i   (1'b0                  ),
+    .addr_i (rram_addr[$clog2(RRAMNumWords)-1+$clog2(AxiDataWidth/8):$clog2(AxiDataWidth/8)]),
+    .wdata_i(rram_wdata                                                                     ),
+    .be_i   (rram_be                                                                        ),
+    .rdata_o(rram_rdata                                                                     )
+  );
+`else
+  assign rram_rdata = '0;
+`endif
+
+  // // One-cycle latency
+  // `FF(rram_rvalid, rram_req, 1'b0);
+
+  // RRAM latency delay chain (3 cycles using FF)
+  logic rram_req_d1, rram_req_d2;
+  `FF(rram_req_d1, rram_req, 1'b0);
+  `FF(rram_req_d2, rram_req_d1, 1'b0);
+  `FF(rram_rvalid, rram_req_d2, 1'b0);
 
   ////////////
   //  UART  //
@@ -472,6 +567,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     cfg.NrCachedRegionRules   = 1;
     cfg.CachedRegionAddrBase  = {DRAMBase};
     cfg.CachedRegionLength    = {DRAMLength};
+    cfg.MmuPresent = 0;
     // Return modified config
     return cfg;
   endfunction
@@ -514,7 +610,7 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     .AxiAddrWidth      (AxiAddrWidth         ),
     .AxiIdWidth        (AxiCoreIdWidth       ),
     .AxiNarrowDataWidth(AxiNarrowDataWidth   ),
-    .AxiWideDataWidth  (AxiDataWidth         ),
+    .AxiWideDataWidth  (tc_pkg::AXI_DATA_WIDTH           ),
     .ara_axi_ar_t      (ara_axi_ar_chan_t    ),
     .ara_axi_aw_t      (ara_axi_aw_chan_t    ),
     .ara_axi_b_t       (ara_axi_b_chan_t     ),
@@ -535,7 +631,13 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     .system_axi_r_t    (system_r_chan_t      ),
     .system_axi_w_t    (system_w_chan_t      ),
     .system_axi_req_t  (system_req_t         ),
-    .system_axi_resp_t (system_resp_t        ))
+    .system_axi_resp_t (system_resp_t        )
+    // .TcL2BaseAddr      (DRAMBase             ),
+    // .TcRramBaseAddr    (RRAMBase             ),
+    // .TcAInL2           (1'b1                 ),
+    // .TcBInL2           (1'b1                 ),
+    // .TcDinInL2         (1'b1                 )
+    )
 `else
   ara_system
 `endif
@@ -548,12 +650,16 @@ module ara_soc import axi_pkg::*; import ara_pkg::*; #(
     .scan_data_i  (1'b0                     ),
     .scan_data_o  (/* Unconnected */        ),
 `ifndef TARGET_GATESIM
-    .axi_req_o    (system_axi_req           ),
-    .axi_resp_i   (system_axi_resp          )
+    .axi_mst_req_o    (system_axi_req           ),
+    .axi_mst_resp_i   (system_axi_resp          ),
+    .axi_slv_req_i    (periph_wide_axi_req[TC]  ),
+    .axi_slv_resp_o   (periph_wide_axi_resp[TC] )
   );
 `else
-    .axi_req_o    (system_axi_req_spill     ),
-    .axi_resp_i   (system_axi_resp_spill_del)
+    .axi_mst_req_o    (system_axi_req_spill     ),
+    .axi_mst_resp_i   (system_axi_resp_spill_del),
+    .axi_slv_req_i    (periph_wide_axi_req[TC]  ),
+    .axi_slv_resp_o   (periph_wide_axi_resp[TC] )
   );
 `endif
 
